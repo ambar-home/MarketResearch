@@ -1,0 +1,151 @@
+.dashboard {
+  min-height: 100vh;
+}
+
+.dash-header {
+  border-bottom: 1px solid var(--border);
+  background: rgba(11, 18, 32, 0.85);
+  backdrop-filter: blur(10px);
+  position: sticky;
+  top: 0;
+  z-index: 10;
+}
+
+.dash-header-inner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 1rem 0;
+}
+
+.dash-brand {
+  display: flex;
+  align-items: center;
+  gap: 0.85rem;
+}
+
+.dash-mark {
+  width: 38px;
+  height: 38px;
+  border-radius: 10px;
+  border: 1px solid var(--accent-border);
+  background:
+    linear-gradient(135deg, rgba(45, 212, 191, 0.3), transparent 60%),
+    #0b1220;
+}
+
+.dash-eyebrow {
+  margin: 0;
+  font-size: 0.72rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--accent);
+  font-weight: 600;
+}
+
+.dash-brand h1 {
+  margin: 0.1rem 0 0;
+  font-size: 1.25rem;
+  letter-spacing: -0.02em;
+}
+
+.dash-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.85rem;
+}
+
+.dash-user strong {
+  color: var(--text);
+  font-weight: 600;
+}
+
+.dash-main {
+  padding: 1.5rem 0 2.5rem;
+  display: flex;
+  flex-direction: column;
+  gap: 1.15rem;
+}
+
+.dash-tabs {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.65rem;
+}
+
+.dash-tab {
+  text-align: left;
+  border: 1px solid var(--border);
+  background: var(--bg-elevated);
+  color: var(--text-muted);
+  border-radius: var(--radius);
+  padding: 0.9rem 1rem;
+  cursor: pointer;
+  transition: border-color 0.15s ease, background 0.15s ease, color 0.15s ease;
+}
+
+.dash-tab:hover {
+  border-color: var(--border-strong);
+  color: var(--text);
+}
+
+.dash-tab.is-active {
+  border-color: var(--accent-border);
+  background: var(--accent-soft);
+  color: var(--text);
+}
+
+.dash-tab-label {
+  display: block;
+  font-weight: 650;
+  font-size: 0.98rem;
+}
+
+.dash-tab-hint {
+  display: block;
+  margin-top: 0.2rem;
+  font-size: 0.8rem;
+  color: var(--text-faint);
+}
+
+.dash-panel {
+  border: 1px solid var(--border);
+  border-radius: calc(var(--radius) + 2px);
+  background: var(--bg-panel);
+  padding: 1.25rem;
+  overflow: hidden;
+}
+
+.dash-panel-heading {
+  margin-bottom: 1.15rem;
+}
+
+.dash-panel-heading h2 {
+  margin: 0;
+  font-size: 1.15rem;
+}
+
+.dash-panel-heading p {
+  margin: 0.35rem 0 0;
+  font-size: 0.9rem;
+}
+
+.overview-placeholder {
+  border: 1px dashed var(--border);
+  border-radius: var(--radius);
+  padding: 2rem 1rem;
+  text-align: center;
+  color: var(--text-faint);
+}
+
+@media (max-width: 640px) {
+  .dash-header-inner {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
+  .dash-tabs {
+    grid-template-columns: 1fr;
+  }
+}
