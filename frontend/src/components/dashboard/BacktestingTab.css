@@ -1,0 +1,163 @@
+.backtest-tab {
+  display: flex;
+  flex-direction: column;
+  gap: 1.1rem;
+}
+
+.backtest-kicker {
+  margin: 0;
+  font-size: 0.72rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--accent);
+  font-weight: 650;
+}
+
+.backtest-hero h3 {
+  margin: 0.3rem 0;
+  font-size: 1.05rem;
+}
+
+.backtest-form {
+  display: flex;
+  flex-direction: column;
+  gap: 0.85rem;
+}
+
+.backtest-fields {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 0.85rem;
+}
+
+.checkbox-field {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 0.45rem;
+}
+
+.checkbox-field label {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  color: var(--text-muted);
+  font-size: 0.88rem;
+}
+
+.metric-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 0.65rem;
+}
+
+.metric-card {
+  padding: 0.85rem 1rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg-elevated);
+}
+
+.metric-card span {
+  display: block;
+  font-size: 0.7rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--text-faint);
+  margin-bottom: 0.3rem;
+  font-weight: 600;
+}
+
+.metric-card strong {
+  font-size: 1.05rem;
+}
+
+.chart-panel h4,
+.compare-block h4,
+.table-wrap h4,
+.assumptions h4 {
+  margin: 0 0 0.65rem;
+  font-size: 0.95rem;
+}
+
+.chart-box {
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg-elevated);
+  padding: 0.5rem;
+}
+
+.assumptions ul {
+  margin: 0;
+  padding-left: 1.1rem;
+  color: var(--text-muted);
+  font-size: 0.88rem;
+  line-height: 1.5;
+}
+
+.compare-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 1rem;
+}
+
+.compare-head select {
+  border: 1px solid var(--border);
+  background: var(--bg-input);
+  color: var(--text);
+  border-radius: var(--radius-sm);
+  padding: 0.45rem 0.65rem;
+}
+
+.table-wrap {
+  overflow-x: auto;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg-elevated);
+  padding: 0.75rem;
+}
+
+.table-wrap table {
+  width: 100%;
+  border-collapse: collapse;
+  min-width: 720px;
+  font-size: 0.86rem;
+}
+
+.table-wrap th,
+.table-wrap td {
+  text-align: left;
+  padding: 0.55rem 0.6rem;
+  border-bottom: 1px solid var(--border);
+}
+
+.table-wrap th {
+  font-size: 0.68rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--text-faint);
+}
+
+.disclaimer {
+  font-size: 0.78rem;
+  line-height: 1.45;
+}
+
+.small {
+  font-size: 0.8rem;
+}
+
+@media (max-width: 900px) {
+  .backtest-fields,
+  .metric-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 560px) {
+  .backtest-fields,
+  .metric-grid {
+    grid-template-columns: 1fr;
+  }
+}

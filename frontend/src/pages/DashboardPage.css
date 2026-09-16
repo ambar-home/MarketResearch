@@ -74,6 +74,14 @@
   gap: 0.65rem;
 }
 
+.dash-tabs-3 {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.dash-tabs-5 {
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+}
+
 .dash-tab {
   text-align: left;
   border: 1px solid var(--border);
@@ -145,7 +153,10 @@
     align-items: flex-start;
   }
 
-  .dash-tabs {
+  .dash-tabs,
+  .dash-tabs-3,
+  .dash-tabs-4,
+  .dash-tabs-5 {
     grid-template-columns: 1fr;
   }
 }

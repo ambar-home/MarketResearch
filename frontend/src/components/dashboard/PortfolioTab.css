@@ -1,0 +1,90 @@
+.portfolio-tab {
+  display: flex;
+  flex-direction: column;
+  gap: 1.2rem;
+}
+
+.portfolio-tab h3 {
+  margin: 0 0 0.7rem;
+  font-size: 0.95rem;
+}
+
+.portfolio-summary {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 0.65rem;
+}
+
+.portfolio-summary > div {
+  padding: 0.85rem 1rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg-elevated);
+}
+
+.portfolio-summary span {
+  display: block;
+  margin-bottom: 0.3rem;
+  font-size: 0.72rem;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--text-faint);
+  font-weight: 600;
+}
+
+.is-up {
+  color: var(--success);
+}
+
+.is-down {
+  color: var(--danger);
+}
+
+.portfolio-table-wrap {
+  overflow-x: auto;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg-elevated);
+}
+
+.portfolio-table-wrap table {
+  width: 100%;
+  border-collapse: collapse;
+  min-width: 760px;
+  font-size: 0.88rem;
+}
+
+.portfolio-table-wrap th,
+.portfolio-table-wrap td {
+  padding: 0.7rem 0.8rem;
+  text-align: left;
+  border-bottom: 1px solid var(--border);
+}
+
+.portfolio-table-wrap th {
+  font-size: 0.68rem;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--text-faint);
+}
+
+.ticker {
+  color: var(--accent);
+  font-weight: 600;
+}
+
+.exch {
+  display: block;
+  font-size: 0.72rem;
+}
+
+.disclaimer {
+  margin: 0;
+  font-size: 0.78rem;
+}
+
+@media (max-width: 800px) {
+  .portfolio-summary {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}

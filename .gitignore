@@ -1,6 +1,8 @@
 # ===== Secrets & local session (never commit) =====
 credentials.txt
 backend/.kite_session.json
+backend/data/journal.json
+backend/data/hourly_journal.json
 .env
 .env.*
 *.pem

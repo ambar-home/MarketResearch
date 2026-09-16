@@ -11,7 +11,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.config import CORS_ORIGINS
-from app.routes import auth, profile, signals
+from app.routes import auth, backtest, hourly, portfolio, profile, research, signals
 from app.services.kite_session import kite_session
 
 logging.basicConfig(level=logging.INFO)
@@ -33,7 +33,11 @@ app.add_middleware(
 
 app.include_router(auth.router)
 app.include_router(profile.router)
+app.include_router(portfolio.router)
 app.include_router(signals.router)
+app.include_router(backtest.router)
+app.include_router(research.router)
+app.include_router(hourly.router)
 
 
 @app.on_event("startup")

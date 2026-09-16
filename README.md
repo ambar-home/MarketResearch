@@ -1,77 +1,64 @@
-# MarketResearch — Kite Connect Dashboard
+# MarketResearch — Zerodha Kite Quantitative Research Dashboard
 
-React + Vite frontend with a Python FastAPI backend for Zerodha Kite Connect login.
+React + Vite frontend with a Python FastAPI backend for **Zerodha Kite Connect** market research.
 
-The **access token stays on the server** (saved to `backend/.kite_session.json`) and is never sent to the browser. During local development the backend restores that session on startup so you do not need to log in again after every code change.
+This is a **decision-support / research platform**.  
+It does **not** place live Zerodha orders.
 
 ---
 
-## Project layout
+## What it does
 
+1. Secure Kite login (access token stays **server-side only**)
+2. User/profile view
+3. Nifty 100 **scored SMA crossover research**
+4. Historical **SMA backtesting** with costs + slippage
+
+A crossover is never shown as “BUY NOW”. Labels look like:
+
+- Strong Bullish / Good Bullish / Moderate Bullish / Weak Bullish
+- Strong Bearish / …
+- Avoid / Low Confidence
+- Needs Confirmation / Research candidate
+
+---
+
+## Architecture
+
+```text
+Frontend (React)  →  FastAPI  →  Kite Connect
+                         ├── auth / profile
+                         ├── signals (scored scanner)
+                         └── backtest (historical research)
 ```
-MarketResearch/
-├── backend/                 # FastAPI + Kite Connect
-│   ├── app/
-│   │   ├── main.py
-│   │   ├── config.py
-│   │   ├── schemas.py
-│   │   ├── routes/
-│   │   └── services/
-│   ├── requirements.txt
-│   └── .kite_session.json   # created after login (gitignored)
-├── frontend/                # React + Vite (TypeScript)
-└── credentials.txt          # optional local notes (do not commit secrets)
-```
+
+### Key backend modules
+
+| Module | Role |
+|--------|------|
+| `services/kite_session.py` | Login + persisted access token |
+| `services/indicators.py` | SMA, RSI, ATR, volume, slope, crossover |
+| `services/market_context.py` | Nifty + sector index context (cached per scan) |
+| `services/signal_engine.py` | Score, classification, risk/reward research |
+| `services/transaction_costs.py` | Configurable Indian equity cost model |
+| `services/backtesting.py` | No-lookahead SMA backtest + combo compare |
+| `services/sma_scanner.py` | Nifty 100 orchestration |
 
 ---
 
-## Prerequisites
+## Setup
 
-- Python 3.10+
-- Node.js 18+
-- A Zerodha Kite Connect app (API key + API secret)
-
----
-
-## 1. Backend setup
+### Backend
 
 ```bash
 cd backend
-python3 -m venv .venv
-source .venv/bin/activate          # Windows: .venv\Scripts\activate
+# or use repo-root .venv
+source ../.venv/bin/activate
 pip install -r requirements.txt
 uvicorn app.main:app --reload --port 8000
 ```
 
-API docs: http://127.0.0.1:8000/docs
-
-### Useful endpoints
-
-| Method | Path | Purpose |
-|--------|------|---------|
-| `POST` | `/api/auth/login` | Exchange request token → access token (saved server-side) |
-| `GET`  | `/api/auth/status` | Is a session already restored? |
-| `POST` | `/api/auth/logout` | Clear in-memory + saved session |
-| `GET`  | `/api/profile` | User name, ID, products, exchanges |
-| `POST` | `/api/signals/sma-crossover` | Nifty 100 SMA crossover scan |
-
-Login body example:
-
-```json
-{
-  "api_key": "...",
-  "api_secret": "...",
-  "request_token": "..."
-}
-```
-
-The response never includes `access_token`.
-
----
-
-## 2. Frontend setup
-
-In a second terminal:
+### Frontend
 
 ```bash
 cd frontend
@@ -79,57 +66,113 @@ npm install
 npm run dev
 ```
 
-Open: http://localhost:5173
+Open http://localhost:5173
 
-Vite proxies `/api/*` to `http://127.0.0.1:8000`.
+### Tests
 
----
-
-## 3. How to log in
-
-1. Open Kite login in a browser:
-
-   `https://kite.zerodha.com/connect/login?v=3&api_key=YOUR_API_KEY`
-
-2. After approval, Zerodha redirects to your app redirect URL with `?request_token=...`
-3. Paste **API Key**, **API Secret**, and **Request Token** on the Login page
-4. Click **Login** → you land on the Dashboard
-5. Open the **User** tab to see profile fields from Kite
-
-Request tokens expire quickly and can be used only once.
+```bash
+cd backend
+python -m pytest tests/ -q
+```
 
 ---
 
-## Session reuse (local development)
+## APIs
 
-After a successful login, the backend writes:
+| Method | Path | Purpose |
+|--------|------|---------|
+| `POST` | `/api/auth/login` | Exchange request token → access token (server-only) |
+| `GET` | `/api/auth/status` | Session status |
+| `POST` | `/api/auth/logout` | Clear session |
+| `GET` | `/api/profile` | Kite profile |
+| `POST` | `/api/signals/sma-crossover` | Enhanced scored scan |
+| `POST` | `/api/backtest/sma` | Historical SMA backtest |
+| `GET` | `/api/health` | Health check |
 
-`backend/.kite_session.json`
-
-On the next `uvicorn` start (or reload), it tries to restore that session by calling Kite `profile()`. If the token is still valid, `/api/auth/status` reports `authenticated: true` and the frontend skips the login page.
-
-Logout deletes this file.
-
-> Note: Zerodha access tokens typically last until ~6 AM IST the next trading day. After that you must log in again with a fresh request token.
-
----
-
-## Customizing the dark UI
-
-Edit CSS variables in:
-
-`frontend/src/styles/theme.css`
-
-Examples:
-
-- `--accent` — primary highlight color
-- `--bg` / `--bg-panel` — page and panel backgrounds
-- `--font` — typography
+Docs: http://127.0.0.1:8000/docs
 
 ---
 
-## Security notes
+## Signal research concepts
 
-- Never commit `backend/.kite_session.json`, `credentials.txt`, or API secrets
-- Do not log or display the access token in the frontend
-- This setup is intended for **local development**
+### SMA crossover
+Short SMA crossing long SMA (bullish/bearish). Detected on completed daily bars.
+
+### SMA spread %
+`((short - long) / long) * 100` — separation feature, not a guaranteed edge.
+
+### Long SMA slope
+Rising / Flat / Falling using configurable lookback + thresholds.
+
+### Volume confirmation
+Current volume vs N-day average (`STRONG` / `NORMAL` / `WEAK`).
+
+### RSI (Wilder)
+Momentum context — not “70 = sell forever”.
+
+### ATR
+Volatility estimate for research stop distance. Does not predict direction.
+
+### Market / sector confirmation
+Nifty 50 trend once per scan; curated sector-index mapping where available.
+Unmapped symbols show **Sector confirmation unavailable** (no fake data).
+
+### Signal score (0–100)
+Initial heuristic weights in `app/config.py` (`ScoreWeights`).  
+**Not a probability of profit.** Explainable via `score_breakdown`.
+
+### Risk/reward research
+ATR-based stop reference + configurable R-multiple target. Informational only.
+
+---
+
+## Backtesting assumptions
+
+- Signal on day **T close**
+- Enter/exit at day **T+1 / E+1 open**
+- Long-only research model
+- Equal capital split across selected symbols
+- Optional brokerage/STT/exchange/SEBI/stamp/GST model + slippage bps
+- Chronological train/validation/OOS segment metadata included
+
+Fee rates are configurable and should be verified against current Zerodha/NSE schedules.
+
+---
+
+## Configuration
+
+Tunable defaults live in `backend/app/config.py`:
+
+- SMA / RSI / ATR / volume periods
+- slope thresholds
+- volume / extension thresholds
+- score weights and bands
+- ATR stop multiplier / target R multiple
+- transaction cost rates + slippage
+
+See `.env.example` for secret/env guidance.  
+Never commit `credentials.txt` or `backend/.kite_session.json`.
+
+---
+
+## Dashboard tabs
+
+1. **User** — Kite profile
+2. **Signals** — overview, filters, scored table, detail drawer
+3. **Backtesting** — metrics, equity/drawdown charts, trades, combo compare
+
+---
+
+## Limitations
+
+- Daily strategy only (not intraday)
+- Sector mapping is curated, not complete for every symbol
+- Score weights are heuristics until validated by backtests
+- Backtest uses a stock subset for API speed
+- Not investment advice; no automated order placement
+
+---
+
+## Disclaimer
+
+This dashboard provides quantitative market-research signals based on historical market data and configurable trading rules. Signals, scores, stop references and targets are informational and are not guarantees of future performance or investment advice.

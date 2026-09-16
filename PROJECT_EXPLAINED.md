@@ -1,558 +1,818 @@
-# MarketResearch — Full Project Explanation
+# MarketResearch — Full Project Explanation (Updated)
 
-This document explains **what this project is**, **how every piece works**, **what we built**, and **where algorithmic trading fits today**. It is written for beginners who want the full picture.
+This document is the **complete, up-to-date explanation** of the MarketResearch project after the quantitative-signal and backtesting upgrades.
+
+It covers:
+
+1. What the project is now
+2. Architecture and every major module
+3. Authentication and security
+4. How the enhanced signal pipeline works
+5. Scoring, filters, and the Signals UI
+6. Backtesting and transaction costs
+7. How to run and verify everything
+8. **How to use this project carefully** (so you do not treat signals as guaranteed predictions)
+9. Limitations and recommended next steps
 
 ---
 
-## 1. What is this project in one sentence?
+## 1. What this project is (current version)
 
-**MarketResearch** is a local research dashboard that connects to your Zerodha Kite account, securely stores your API session on the server, and scans Nifty 100 stocks for **SMA (Simple Moving Average) crossover signals** so you can study market trends faster than doing it by hand.
+**MarketResearch** is a local **quantitative market-research and decision-support dashboard**.
 
-It is **not** a fully automated trading bot yet.  
-Right now it is a **market research + signal generation** system — the first and most important layer of algo trading.
+It connects to your **Zerodha Kite Connect** account and helps you:
+
+- Scan **Nifty 100** stocks using daily historical candles
+- Detect **SMA crossovers** (short vs long)
+- Enrich each crossover with:
+  - SMA spread
+  - Long-SMA slope / trend quality
+  - Price vs long SMA
+  - Volume confirmation
+  - RSI momentum context
+  - ATR volatility
+  - Nifty market confirmation
+  - Sector confirmation (when a curated mapping exists)
+  - Research stop / target / reward-risk framework
+- Produce an explainable **Signal Quality Score (0–100)**
+- Classify signals as Strong / Good / Moderate / Weak / Avoid
+- Rank by **score first**, then recency
+- Run **historical SMA backtests** with costs and slippage
+- Compare multiple SMA combinations
+
+### What it is not
+
+- Not a live auto-trading bot
+- Not a guaranteed prediction engine
+- Not investment advice
+- Not an intraday/hourly trading system (current strategy is **daily**)
+
+A high score means:
+
+> “This setup aligns well with our configured research rules.”
+
+It does **not** mean:
+
+> “87% chance this stock will go up.”
 
 ---
 
-## 2. The problem this project solves
+## 2. Evolution of the project
 
-Manually checking 100 large Indian stocks every day is slow and error-prone:
+### Earlier version
 
-1. Open charts one by one
-2. Draw or eyeball moving averages
-3. Decide if a crossover happened
-4. Remember which stocks crossed recently
-5. Rank which signals are newest
+```text
+SMA crossover → Bullish / Bearish → rank by date
+```
 
-This project automates that research loop:
+### Current version
 
-- Pulls the official **Nifty 100** stock list
-- Downloads daily price history from **Zerodha Kite Connect**
-- Calculates **short SMA** and **long SMA**
-- Detects **bullish** and **bearish** crossovers
-- Ranks results by **most recent crossover date**
-- Shows everything in a clean dark dashboard (and also as a CSV from the original script)
+```text
+Market Data
+    ↓
+SMA Crossover
+    ↓
+Trend Quality (long SMA slope, price vs long SMA)
+    ↓
+Volume Confirmation
+    ↓
+Momentum Confirmation (RSI)
+    ↓
+Market Confirmation (Nifty 50)
+    ↓
+Sector Confirmation (when available)
+    ↓
+Extension + ATR risk research
+    ↓
+Signal Quality Score + breakdown
+    ↓
+STRONG / GOOD / MODERATE / WEAK / AVOID
+    ↓
+Human research candidate (not auto-buy)
+```
+
+Also added:
+
+- Backtesting tab + API
+- Transaction-cost model
+- Strategy comparison across SMA pairs
+- Unit tests for indicators, scoring, and backtest mechanics
 
 ---
 
 ## 3. High-level architecture
 
-The project has three layers:
-
 ```text
-┌────────────────────────────────────────────────────────────┐
-│  Frontend (React + Vite)                                   │
-│  - Login page                                              │
-│  - Dashboard                                               │
-│    - User tab                                              │
-│    - Signals tab                                           │
-└───────────────────────────┬────────────────────────────────┘
-                            │ HTTP /api/*
-                            ▼
-┌────────────────────────────────────────────────────────────┐
-│  Backend (Python FastAPI)                                  │
-│  - Auth (login / status / logout)                          │
-│  - Profile                                                 │
-│  - SMA crossover scanner                                   │
-│  - Saves access token server-side only                     │
-└───────────────────────────┬────────────────────────────────┘
-                            │ Kite Connect SDK
-                            ▼
-┌────────────────────────────────────────────────────────────┐
-│  Zerodha Kite Connect APIs                                 │
-│  - Login / session                                         │
-│  - Profile                                                 │
-│  - Instruments (symbol → token map)                        │
-│  - Historical daily candles                                │
-└────────────────────────────────────────────────────────────┘
+┌──────────────────────────────────────────────────────────────┐
+│ Frontend (React + Vite + TypeScript)                         │
+│  Login                                                       │
+│  Dashboard                                                   │
+│    ├── User tab                                              │
+│    ├── Signals tab (scored research + filters + drawer)      │
+│    └── Backtesting tab (metrics + equity/drawdown charts)    │
+└───────────────────────────────┬──────────────────────────────┘
+                                │ /api/*  (Vite proxy → :8000)
+                                ▼
+┌──────────────────────────────────────────────────────────────┐
+│ Backend (Python FastAPI)                                     │
+│  auth / profile / signals / backtest / health                │
+│  access token saved server-side only                         │
+└───────────────────────────────┬──────────────────────────────┘
+                                │ Kite Connect SDK
+                                ▼
+┌──────────────────────────────────────────────────────────────┐
+│ Zerodha Kite APIs                                            │
+│  session, profile, instruments, historical daily candles     │
+└──────────────────────────────────────────────────────────────┘
 ```
 
-There is also a standalone research script:
+Standalone CLI still exists:
 
-- `nifty 100_sma_scanner.py`  
-  A beginner-friendly one-file scanner that does the same core SMA logic and writes `nifty 100_sma_signals.csv`.
+- `nifty 100_sma_scanner.py` → simpler SMA-only scan → `nifty 100_sma_signals.csv`
+
+The dashboard path is the richer research workflow.
 
 ---
 
-## 4. Project folders and what each part does
+## 4. Current project structure
 
 ```text
 MarketResearch/
-├── frontend/                     # Browser UI
+├── frontend/
 │   └── src/
-│       ├── pages/                # Login + Dashboard screens
-│       ├── components/dashboard/ # User tab + Signals tab
-│       ├── api/                  # Calls backend APIs
-│       ├── context/              # Auth state for the app
-│       └── styles/theme.css      # Dark theme customization
+│       ├── pages/
+│       │   ├── LoginPage.tsx
+│       │   └── DashboardPage.tsx
+│       ├── components/dashboard/
+│       │   ├── UserTab.tsx
+│       │   ├── SignalsTab.tsx          # scored signals UI
+│       │   └── BacktestingTab.tsx      # historical research UI
+│       ├── api/
+│       │   ├── client.ts
+│       │   └── types.ts
+│       ├── context/AuthContext.tsx
+│       └── styles/theme.css
 │
-├── backend/                      # Server API
-│   └── app/
-│       ├── main.py               # FastAPI app entry
-│       ├── config.py             # Paths, CORS, session file
-│       ├── schemas.py            # Request/response models
-│       ├── routes/               # HTTP endpoints
-│       └── services/             # Business logic
-│           ├── kite_session.py   # Login + token storage
-│           └── sma_scanner.py    # Nifty 100 SMA scanner
+├── backend/
+│   ├── app/
+│   │   ├── main.py
+│   │   ├── config.py                 # all tunable research defaults
+│   │   ├── schemas.py
+│   │   ├── routes/
+│   │   │   ├── auth.py
+│   │   │   ├── profile.py
+│   │   │   ├── signals.py
+│   │   │   └── backtest.py
+│   │   └── services/
+│   │       ├── kite_session.py
+│   │       ├── indicators.py
+│   │       ├── market_context.py
+│   │       ├── signal_engine.py
+│   │       ├── transaction_costs.py
+│   │       ├── backtesting.py
+│   │       └── sma_scanner.py
+│   ├── tests/                        # pytest unit tests
+│   ├── requirements.txt
+│   └── .kite_session.json            # created after login (gitignored)
 │
-├── nifty 100_sma_scanner.py      # Standalone CLI scanner
-├── nifty 100_sma_signals.csv     # Latest CLI scan output
-├── credentials.txt               # Local API key/secret notes
-└── README.md                     # Setup / run guide
+├── nifty 100_sma_scanner.py
+├── nifty 100_sma_signals.csv
+├── credentials.txt                   # local notes only (gitignored)
+├── .env.example
+├── .gitignore
+├── README.md
+└── PROJECT_EXPLAINED.md              # this file
 ```
-
-### Important security idea
-
-- `api_key`, `api_secret`, and `request_token` are entered for login
-- Kite returns an **access token**
-- That access token is saved only on the backend in:
-
-```text
-backend/.kite_session.json
-```
-
-- The browser **never** receives or displays the access token
-- On backend restart, the server tries to restore that session so local development is smoother
 
 ---
 
-## 5. What happens when you use the app (step by step)
+## 5. Security and session handling (unchanged principle)
 
-### Step A — Start the system
+### Login flow
 
-1. Start backend:
+1. Open Kite login URL with your API key
+2. After approval, copy one-time `request_token`
+3. Enter API Key, API Secret, Request Token on the Login page
+4. Frontend posts them to `POST /api/auth/login`
+5. Backend calls Kite `generate_session(...)`
+6. Backend stores `access_token` in memory + `backend/.kite_session.json`
+7. Frontend never receives the access token
+
+### Session reuse
+
+On backend startup, `kite_session.try_restore()` reloads the saved token and validates it with `profile()`.
+
+That means during local development you usually do **not** need to log in after every code reload (until the daily Kite token expires).
+
+### Never committed
+
+- `credentials.txt`
+- `backend/.kite_session.json`
+- real `.env` secrets
+
+---
+
+## 6. APIs (current)
+
+| Method | Path | Purpose |
+|--------|------|---------|
+| `POST` | `/api/auth/login` | Create server-side Kite session |
+| `GET` | `/api/auth/status` | Is session alive / restored? |
+| `POST` | `/api/auth/logout` | Clear session + delete saved token file |
+| `GET` | `/api/profile` | User name, ID, products, exchanges |
+| `POST` | `/api/signals/sma-crossover` | Enhanced scored Nifty scan |
+| `POST` | `/api/backtest/sma` | Historical SMA backtest (+ optional combo compare) |
+| `GET` | `/api/health` | Health check |
+
+Interactive docs: http://127.0.0.1:8000/docs
+
+### Enhanced signals request example
+
+```json
+{
+  "short_sma": 6,
+  "long_sma": 30,
+  "lookback_days": 400,
+  "max_stocks": 100,
+  "rsi_period": 14,
+  "volume_period": 20,
+  "atr_period": 14,
+  "slope_lookback": 5,
+  "include_market_context": true,
+  "include_sector_context": true
+}
+```
+
+`max_stocks` is allowed from **1 to 200**.
+
+Universe selection:
+
+- `1–100` → official **Nifty 100** CSV
+- `101–200` → official **Nifty 200** CSV
+
+So if you enter `150`, the scanner loads Nifty 200 and processes the first 150 constituents (subject to successful instrument mapping / candle availability).
+
+---
+
+## 7. Backend modules in detail
+
+### 7.1 `config.py`
+
+Central place for non-secret research defaults:
+
+- Indicator periods (SMA, RSI, ATR, volume, slope lookback)
+- Slope rising/falling thresholds
+- Volume strong/weak thresholds
+- Extension thresholds
+- ATR stop multiplier and target R-multiple
+- Signal score weights and classification bands
+- Approximate Indian equity transaction-cost rates + slippage bps
+
+These are **heuristics** and should be validated with backtests before trusting them heavily.
+
+### 7.2 `indicators.py`
+
+Deterministic math only (no LLM):
+
+| Function / concept | Meaning |
+|--------------------|---------|
+| SMA | Average close over N days |
+| SMA spread % | `((short - long) / long) * 100` |
+| Long SMA slope | Rising / Flat / Falling over lookback |
+| Price vs long SMA | Above/below + distance % |
+| Extension status | NORMAL / ELEVATED / EXTENDED vs short SMA |
+| Volume metrics | Current vs average → STRONG / NORMAL / WEAK |
+| RSI (Wilder) | Momentum context |
+| ATR (Wilder) | Volatility estimate |
+| Crossover detect | Latest bullish/bearish SMA cross |
+
+### 7.3 `market_context.py`
+
+- Fetches **Nifty 50** once per scan
+- Classifies market as BULLISH / NEUTRAL / BEARISH using transparent rules:
+  - close above long SMA + rising slope → bullish
+  - close below long SMA + falling slope → bearish
+  - otherwise neutral
+- Sector confirmation uses a **curated symbol → sector-index map**
+- If mapping is missing: `Sector confirmation unavailable` (no invented data)
+- Sector/index histories are cached during one scan to reduce API calls
+
+### 7.4 `signal_engine.py`
+
+Builds:
+
+1. Research risk/reward (ATR stop reference + target multiple)
+2. Explainable score breakdown
+3. Classification label
+4. Human-readable summary
+
+Initial score weights (sum = 100):
+
+| Factor | Weight |
+|--------|--------|
+| SMA crossover | 20 |
+| Price vs long SMA | 10 |
+| Long SMA slope | 15 |
+| Volume | 15 |
+| Momentum (RSI) | 10 |
+| Market context | 10 |
+| Sector context | 10 |
+| Overextension | 5 |
+| Risk/reward structure | 5 |
+
+Classification bands (configurable):
+
+| Score | Strength |
+|------:|----------|
+| 80–100 | STRONG |
+| 65–79 | GOOD |
+| 50–64 | MODERATE |
+| 35–49 | WEAK |
+| 0–34 | AVOID / LOW CONFIDENCE |
+
+Final labels look like `STRONG_BULLISH`, `GOOD_BEARISH`, `AVOID_BULLISH`, etc.
+
+### 7.5 `transaction_costs.py`
+
+Configurable approximate Indian equity cost model:
+
+- Brokerage
+- STT
+- Exchange transaction charges
+- SEBI charges
+- Stamp duty
+- GST
+- Slippage in basis points
+
+Rates must be verified against current Zerodha/NSE schedules. They are research approximations.
+
+### 7.6 `backtesting.py`
+
+Long-only SMA crossover backtester with explicit assumptions:
+
+1. Crossover detected on completed day **T close**
+2. Entry/exit at next session **open** (T+1 / E+1)
+3. No look-ahead bias in signal detection
+4. Optional costs + slippage
+5. Equal capital split across selected symbols
+6. Chronological train / validation / out-of-sample segment metadata
+
+Metrics include:
+
+- Total trades, win rate
+- Average win/loss %
+- Profit factor, expectancy
+- Total return, CAGR (when valid)
+- Max drawdown, Sharpe (approx)
+- Holding period, exposure
+- Costs and return before/after costs
+
+Also supports comparing default SMA combos such as:
+
+`5/20, 6/20, 6/30, 10/30, 10/50, 20/50, 20/100, 50/200`
+
+Highest return is **not** automatically “best”. Prefer risk-adjusted metrics.
+
+### 7.7 `sma_scanner.py`
+
+Orchestrates a live research scan:
+
+1. Download official Nifty 100 CSV
+2. Map symbols → NSE EQ instrument tokens
+3. Fetch daily history per stock
+4. Analyze crossover + indicators
+5. Attach market/sector context
+6. Score and classify
+7. Rank by score DESC, then crossover date DESC
+8. Return scan summary + signals + optional failure reasons
+
+One stock failing does not fail the whole scan.
+
+---
+
+## 8. Frontend experience (current)
+
+### Tabs
+
+1. **User** — Kite profile (name, ID, products, exchanges)
+2. **Signals** — scored research workflow
+3. **Backtesting** — historical strategy research
+
+### Signals tab features
+
+**Controls**
+
+- Short SMA (default 6)
+- Long SMA (default 30)
+- Lookback Days
+- Max Stocks (1–200, default 100)
+- Advanced: RSI / Volume / ATR / slope lookback
+- Advanced filters:
+  - Signal type (All / Bullish / Bearish)
+  - Quality (Strong / Good / Moderate / Weak)
+  - Minimum score
+  - Crossover age
+  - Market confirmation
+  - Sector confirmation
+  - Volume strength
+  - Sort by score / date / ticker / volume / spread / RSI / R:R
+
+**Overview cards**
+
+- Nifty trend
+- Stocks scanned
+- Bullish / Bearish counts
+- Strong signals
+- Average score
+- New crossovers today
+
+**Table columns**
+
+Rank, Stock, Signal, Score, Crossover, SMA Spread, Trend, Volume, RSI, Market, Sector, R:R, Details
+
+**Detail drawer (“View”)**
+
+Shows full explanation:
+
+- Score meaning
+- Trend / SMA values
+- Volume + RSI
+- Market / sector context
+- Research stop/target/R:R
+- Factor-by-factor “Why this score?”
+- Explicit disclaimer: research signal, not auto trade
+
+### Backtesting tab features
+
+- SMA periods, date range, capital
+- Costs on/off, slippage bps, max stocks
+- Optional SMA combo comparison
+- Metrics cards
+- Equity curve + drawdown chart (Recharts)
+- Trades table
+- Comparison table sortable by Sharpe / return / drawdown / PF / win rate
+
+---
+
+## 9. How to run the project
+
+### Backend
 
 ```bash
 cd backend
+source ../.venv/bin/activate
+pip install -r requirements.txt
 uvicorn app.main:app --reload --port 8000
 ```
 
-2. Start frontend:
+### Frontend
 
 ```bash
 cd frontend
+npm install
 npm run dev
 ```
 
-3. Open:
+Open: http://localhost:5173
 
-```text
-http://localhost:5173
-```
+### Tests
 
-The frontend talks to `/api/...`, and Vite proxies those calls to the FastAPI backend on port `8000`.
-
-### Step B — Login flow (Zerodha Kite Connect)
-
-Zerodha does not let apps keep your password. The flow is:
-
-1. You open Kite login using your API key
-2. After approval, Kite redirects with a one-time `request_token`
-3. You paste:
-   - API Key
-   - API Secret
-   - Request Token
-4. Frontend sends those values to `POST /api/auth/login`
-5. Backend uses Kite SDK `generate_session(...)`
-6. Backend receives `access_token`
-7. Backend stores it in memory + `.kite_session.json`
-8. Frontend only gets safe info like:
-   - login success
-   - user name
-   - user id
-
-Then the app navigates to the dashboard.
-
-### Step C — User tab
-
-The User tab calls `GET /api/profile`.
-
-Backend uses the saved access token and asks Kite for your profile. The UI shows:
-
-- User Name
-- User ID
-- Products (example: CNC, MIS, NRML)
-- Exchanges (example: NSE, BSE, NFO)
-
-This proves the session is alive and the API connection works.
-
-### Step D — Signals tab (core research feature)
-
-On the Signals tab you can set:
-
-- **Short SMA** (default `6`)
-- **Long SMA** (default `30`)
-- **Lookback Days** (default `400`)
-- **Max Stocks** (default `100`)
-
-When you click **Generate Signals**, frontend calls:
-
-```text
-POST /api/signals/sma-crossover
-```
-
-Backend then runs the full scanner pipeline (explained next).
-
----
-
-## 6. The SMA crossover scanner — what is happening technically
-
-This is the heart of the project.
-
-### 6.1 Load Nifty 100 constituents
-
-The scanner downloads the official Nifty Indices CSV (Nifty 100 list), typically from NSE archives:
-
-```text
-https://archives.nseindia.com/content/indices/ind_nifty100list.csv
-```
-
-From that file it extracts:
-
-- Symbol / Ticker (example: `RELIANCE`, `TCS`)
-- Company name
-
-Why this matters:  
-You are scanning a defined universe (large liquid Indian stocks), not random tickers.
-
-### 6.2 Map symbols to Kite instrument tokens
-
-Kite historical APIs usually need an **instrument token**, not just `"RELIANCE"`.
-
-So the backend:
-
-1. Downloads NSE instrument master from Kite
-2. Filters equity (`EQ`) instruments
-3. Builds a map like:
-
-```text
-RELIANCE -> 738561
-TCS      -> 2953217
-...
-```
-
-### 6.3 Fetch daily historical candles
-
-For each mapped stock, backend requests daily OHLC history for your lookback window (example: last 400 calendar days).
-
-Each candle includes values like:
-
-- date
-- open
-- high
-- low
-- close
-- volume
-
-The scanner mainly uses **close** prices for SMA calculation.
-
-### 6.4 Calculate SMA 6 and SMA 30 (or your chosen periods)
-
-A **Simple Moving Average (SMA)** is the average closing price over the last N days.
-
-Examples:
-
-- SMA 6 = average of last 6 closes
-- SMA 30 = average of last 30 closes
-
-Interpretation (simplified):
-
-- Short SMA reacts faster to recent price moves
-- Long SMA reacts slower and represents the broader trend
-
-### 6.5 Detect bullish and bearish crossovers
-
-A crossover is when the short SMA crosses the long SMA.
-
-#### Bullish crossover
-
-- Yesterday: short SMA was **at or below** long SMA
-- Today: short SMA is **above** long SMA
-
-Meaning (common interpretation): short-term momentum turned stronger than the medium-term trend. Traders often treat this as a potential **buy / strength** signal.
-
-#### Bearish crossover
-
-- Yesterday: short SMA was **at or above** long SMA
-- Today: short SMA is **below** long SMA
-
-Meaning (common interpretation): short-term momentum weakened relative to the medium-term trend. Traders often treat this as a potential **sell / weakness** signal.
-
-For each stock, the scanner keeps the **most recent** crossover in the lookback window.
-
-### 6.6 Rank by most recent crossover date
-
-All found signals are sorted so newest events appear first.
-
-Example output columns:
-
-| Rank | Ticker | Company | Crossover Type | Crossover Date | Close | SMA 6 | SMA 30 |
-|------|--------|---------|----------------|----------------|-------|-------|--------|
-| 1 | AXISBANK | Axis Bank Ltd. | Bearish | 2026-09-15 | 1224.50 | 1244.32 | 1247.43 |
-| 8 | MAXHEALTH | Max Healthcare... | Bullish | 2026-09-15 | 1040.10 | 1023.15 | 1021.44 |
-
-You already have a generated sample in:
-
-```text
-nifty 100_sma_signals.csv
-```
-
-That CSV is evidence the research pipeline works end-to-end.
-
----
-
-## 7. Frontend experience in detail
-
-### Login page
-
-Purpose:
-
-- Collect Kite credentials and request token
-- Send them to backend
-- Never display access token
-
-### Dashboard
-
-Tabs:
-
-1. **User**
-   - Confirms authentication and profile connectivity
-2. **Signals**
-   - Parameter form
-   - Generate button
-   - Loading state while scanning
-   - Summary counts (signals / scanned / bullish / bearish)
-   - Polished results table
-
-UI style:
-
-- Dark mode by default
-- Clean professional layout
-- Easy to customize via CSS variables in `frontend/src/styles/theme.css`
-
----
-
-## 8. Backend APIs (what the server exposes)
-
-| Method | Endpoint | What it does |
-|--------|----------|--------------|
-| `POST` | `/api/auth/login` | Creates Kite session and saves access token server-side |
-| `GET` | `/api/auth/status` | Checks if a valid session exists/restored |
-| `POST` | `/api/auth/logout` | Clears session and deletes saved token file |
-| `GET` | `/api/profile` | Returns user profile fields from Kite |
-| `POST` | `/api/signals/sma-crossover` | Runs Nifty 100 SMA crossover scanner |
-| `GET` | `/api/health` | Simple health check |
-
-Interactive API docs (when backend is running):
-
-```text
-http://127.0.0.1:8000/docs
+```bash
+cd backend
+python -m pytest tests/ -q
 ```
 
 ---
 
-## 9. What we achieved so far
+## 10. How algorithmic trading fits today
 
-### Achievement 1 — Working Zerodha integration
-
-- Login using Kite Connect
-- Secure server-side token storage
-- Session restore for local development
-- Profile fetch from live Kite APIs
-
-### Achievement 2 — Research-grade signal scanner
-
-- Official Nifty 100 universe
-- Historical candle download
-- Configurable SMA periods
-- Bullish/bearish crossover detection
-- Ranking by recency
-
-### Achievement 3 — Two usable interfaces
-
-1. **CLI script** (`nifty 100_sma_scanner.py`) for quick offline/script-style research
-2. **Web dashboard** for interactive daily use
-
-### Achievement 4 — Beginner-friendly full-stack foundation
-
-- React + Vite frontend
-- FastAPI backend
-- Clear separation of UI / API / trading logic
-- Clean dark UI that can grow into more tools
-
-### Achievement 5 — Real output already produced
-
-The file `nifty 100_sma_signals.csv` shows concrete ranked crossover signals across Nifty 100 names. That means the core algo research idea is not just theoretical — it already runs on real market data.
-
----
-
-## 10. Where does “algo trading” help right now?
-
-This is the most important conceptual section.
-
-### What algo trading usually means
-
-Algorithmic trading means using rules/code to:
-
-1. Observe market data
-2. Detect conditions (signals)
-3. Decide actions (buy/sell/hold)
-4. Optionally place/manage orders automatically
-5. Measure performance and risk
-
-A complete algo system often looks like:
+Complete algo stack:
 
 ```text
-Data → Signals → Decision Rules → Order Execution → Risk Control → Reporting
+Data → Signals → Decision → Risk → Execution → Reporting
 ```
 
-### What this project already covers
+Current project coverage:
 
-| Algo stage | Status in this project | Notes |
-|------------|------------------------|-------|
-| Market data access | Done | Via Kite historical candles |
-| Universe selection | Done | Nifty 100 official list |
-| Indicator calculation | Done | SMA short/long |
-| Signal generation | Done | Bullish/bearish crossover |
-| Ranking / prioritization | Done | Most recent first |
-| Human review UI | Done | Dashboard Signals tab |
-| Strategy backtesting | Not yet | No historical performance simulation |
-| Position sizing / risk rules | Not yet | No capital allocation logic |
-| Auto order placement | Not yet | No buy/sell API calls |
-| Portfolio tracking | Not yet | No holdings/PnL module |
+| Stage | Status |
+|-------|--------|
+| Market data access | Done |
+| Universe selection (Nifty 100) | Done |
+| Indicator calculation | Done |
+| Signal generation + scoring | Done |
+| Explainability | Done |
+| Historical backtesting | Done (core) |
+| Transaction-cost awareness | Done (configurable) |
+| Paper trading ledger | Not yet |
+| Live order placement | Intentionally not implemented |
+| Portfolio / risk engine automation | Not yet |
 
-### So what did algo trading help with *right now*?
+So today this is best described as:
 
-Right now, algo methods help you with **speed, consistency, and coverage**:
+> **Algorithmic research and decision support**
 
-1. **Speed**
-   - Scanning ~100 stocks manually can take hours
-   - Code can do it in minutes
+Not:
 
-2. **Consistency**
-   - Humans forget rules or apply them unevenly
-   - The algorithm always uses the same crossover definition
+> Fully automated trading system
 
-3. **Coverage**
-   - You can watch the full Nifty 100 universe every day
-   - You are less likely to miss a fresh crossover
-
-4. **Prioritization**
-   - Ranking by latest crossover date answers: “What changed most recently?”
-   - That is useful for daily research focus
-
-5. **Foundation for future automation**
-   - Once signals are reliable, you can later add:
-     - filters (volume, trend confirmation, sector)
-     - backtests
-     - paper trading
-     - then carefully, live order execution
-
-### Honest boundary (important)
-
-Today this project is best described as:
-
-> **Algorithmic market research / signal scanner**
-
-Not yet:
-
-> Fully automated algo trading system that places live trades
-
-That is actually a healthy place to start. Most serious traders build signal quality and process discipline before enabling auto-execution.
+That is the correct order for learning and safety.
 
 ---
 
-## 11. How to think about the SMA strategy (practical view)
+## 11. How to use this project to “predict” more carefully
 
-SMA crossover is a classic trend-following idea:
+Important: this tool does **not** predict the future with certainty.  
+It helps you make **more careful, structured probability judgments**.
 
-- Bullish crossover = possible momentum shift upward
-- Bearish crossover = possible momentum shift downward
+Use it as a research checklist, not a crystal ball.
 
-But crossovers are **not guarantees**.
+### Step A — Start with context, not a single stock tip
 
-Common limitations:
+Before acting on any signal, check the Signals overview:
 
-- Late signals (moving averages lag price)
-- Whipsaws in sideways markets (many false crosses)
-- No built-in stop-loss or target logic yet
-- No transaction cost / slippage modeling yet
+1. Is **Nifty trend** bullish / neutral / bearish?
+2. Are there many weak signals or a few strong ones?
+3. What is the **average score** of the scan?
 
-So use current output as:
+Careful rule of thumb:
 
-- A **watchlist generator**
-- A **research shortlist**
-- A starting point for chart confirmation
+- Prefer bullish stock candidates when Nifty is also supportive
+- Be extra skeptical of bullish candidates when Nifty is bearish
+- Treat conflicting market context as a reason to wait or size smaller
 
-Not as automatic “buy immediately” instructions.
+### Step B — Never trade on crossover alone
+
+A raw crossover is only the starting event.
+
+Prefer candidates that also show:
+
+1. **Rising long SMA** (for bullish) or falling (for bearish)
+2. **Price on the correct side** of long SMA
+3. **Volume confirmation** (ideally STRONG or at least NORMAL)
+4. **RSI supportive**, not extreme against your idea
+5. **Market confirmation**
+6. **Sector confirmation** when available
+7. **Not EXTENDED** already
+8. Reasonable research **R:R** (for example around 1.5–2.0+ in the framework)
+
+Practical filter example for cautious bullish research:
+
+```text
+Signal type = Bullish
+Quality = Strong or Good
+Minimum score = 70+
+Crossover age = Today or last 3 days
+Market confirmation = Confirmed
+Volume = Strong or Normal
+Extension = preferably NORMAL
+```
+
+Then open the detail drawer and read the score breakdown.
+
+### Step C — Interpret the score correctly
+
+| Score label | Careful interpretation |
+|-------------|------------------------|
+| STRONG | High alignment with rules; still needs chart + risk check |
+| GOOD | Decent setup; maybe wait for confirmation candle |
+| MODERATE | Mixed evidence; usually watchlist only |
+| WEAK | Low confidence; usually skip |
+| AVOID | Do not treat as actionable research candidate |
+
+Remember:
+
+```text
+Score 87 ≠ 87% probability of profit
+```
+
+### Step D — Use the detail drawer as a pre-trade checklist
+
+For each candidate, ask:
+
+1. Why did it score high? Which factors passed?
+2. Which factors failed or are unknown?
+3. Is price already extended?
+4. Is stop reference too wide for my risk tolerance?
+5. Does sector confirmation exist? If unavailable, am I okay with that uncertainty?
+6. Is this a fresh crossover or already several days old?
+
+Older crossovers are often weaker for fresh entries because part of the move may already have happened.
+
+### Step E — Convert research into a personal decision rule (human-in-the-loop)
+
+Example cautious personal process:
+
+1. Generate Signals
+2. Keep only `STRONG` / `GOOD` with score >= 70
+3. Require market confirmation
+4. Prefer volume >= NORMAL
+5. Open chart manually and confirm structure (support/resistance, news risk, liquidity)
+6. Define max risk in rupees before entry
+7. Use ATR research stop only as a **reference**, then adjust to your own plan
+8. If unclear, skip
+
+Skipping is a valid and often superior decision.
+
+### Step F — Validate ideas with Backtesting before trusting parameters
+
+Do not assume SMA 6/30 is best.
+
+In Backtesting tab:
+
+1. Pick a multi-year date range
+2. Keep costs ON
+3. Use realistic slippage (for example 5–10 bps)
+4. Start with a smaller `max_stocks` for speed
+5. Run one SMA pair
+6. Then enable **Compare SMA combos**
+7. Sort by Sharpe / drawdown / profit factor, not only return
+
+Questions to answer carefully:
+
+- Does this SMA pair survive costs?
+- Is max drawdown acceptable?
+- Is win rate low but profit factor still okay (trend systems often look like this)?
+- Does performance collapse out of sample?
+
+If backtests look poor after costs, do **not** increase confidence just because today’s signal looks pretty.
+
+### Step G — Prefer process quality over prediction confidence
+
+A careful workflow looks like:
+
+```text
+Scan
+ → Filter
+ → Explain
+ → Chart confirm
+ → Backtest context
+ → Risk size
+ → Decide (trade or skip)
+ → Journal result
+```
+
+An unsafe workflow looks like:
+
+```text
+See bullish badge → Buy immediately
+```
+
+### Step H — Position sizing caution (manual)
+
+Even without an automated risk engine, use personal constraints:
+
+- Risk only a small % of capital per idea
+- Avoid clustering many correlated stocks from one weak sector
+- Reduce size when market/sector confirmation is missing
+- Avoid chasing EXTENDED moves
+
+### Step I — Keep daily and intraday separate
+
+This system is built on **daily candles**.
+
+Do not use daily SMA 6/30 scores to micro-manage hourly entries as if they were the same strategy.  
+If you later build intraday logic, it needs its own features, costs, and backtests.
 
 ---
 
-## 12. End-to-end story of what we built in this journey
+## 12. Example: careful reading of one signal
 
-1. Started with a single Python scanner for Nifty 100 SMA crossovers
-2. Produced ranked CSV signals
-3. Built a FastAPI backend for secure Kite login and session reuse
-4. Built a React dashboard with User profile view
-5. Upgraded the dashboard with a Signals tab connected to the live scanner API
-6. Kept access tokens server-side for safer local development
+Suppose the drawer shows:
 
-In short: we moved from a one-off research script to a small but real **research workstation**.
+```text
+RELIANCE
+STRONG BULLISH
+Score 87 / 100
 
----
+SMA6 crossed above SMA30 today
+SMA30 rising
+Price above SMA30
+Volume 1.8x (STRONG)
+RSI 61 (SUPPORTIVE)
+Nifty BULLISH
+Sector ENERGY BULLISH
+Extension NORMAL
+Research R:R 2.0
+```
 
-## 13. What you can do next (natural roadmap)
+### Careful conclusion
 
-If you continue building toward deeper algo trading, a sensible order is:
+- This is a **strong research candidate**
+- Multiple independent confirmations align
+- Still not a guaranteed winner
+- Next human steps:
+  1. Check chart levels and news
+  2. Decide whether stop distance fits account risk
+  3. Decide size
+  4. Or wait one more day for follow-through
 
-1. **Better signal quality**
-   - Add volume filter
-   - Require price above/below long SMA
-   - Add RSI / MACD confirmation
+### Unsafe conclusion
 
-2. **Backtesting**
-   - Simulate historical trades from past crossovers
-   - Measure win rate, drawdown, average return
-
-3. **Paper trading**
-   - Log virtual trades without real money
-
-4. **Risk engine**
-   - Max risk per trade
-   - Max open positions
-   - Daily loss limit
-
-5. **Execution (advanced, careful)**
-   - Place orders via Kite only after risk checks
-   - Start with small size and strong logging
+- “Score 87, so buy with full capital now”
 
 ---
 
-## 14. Quick glossary
+## 13. What we have achieved
 
-- **Kite Connect**: Zerodha’s developer API for market data and trading features
-- **Request token**: One-time login code from Kite redirect URL
-- **Access token**: Session key used for API calls (stored only on backend here)
-- **Instrument token**: Kite’s numeric ID for a tradable symbol
-- **Nifty 100**: Index of 100 large Indian companies
-- **SMA**: Simple Moving Average of closing prices
-- **Crossover**: When one indicator line crosses another
-- **Bullish / Bearish**: Strength vs weakness interpretation of a signal
-- **Algo trading**: Using coded rules for market analysis and optionally trade execution
+1. Secure Zerodha login with server-side token storage
+2. Profile integration
+3. Official Nifty 100 universe loading
+4. Multi-indicator research engine
+5. Explainable signal scoring
+6. Professional Signals dashboard with filters and detail drawer
+7. Backtesting with costs, slippage, charts, and combo comparison
+8. Unit tests for core math and backtest mechanics
+9. Clear research wording (no “BUY NOW” automation)
 
 ---
 
-## 15. Bottom line
+## 14. Known limitations
 
-This project gives you a practical, beginner-friendly path into algorithmic trading by focusing on the part that matters first:
+- Universe:
+  - Max Stocks 1–100 uses Nifty 100
+  - Max Stocks 101–200 uses Nifty 200 so the requested count can actually be scanned
+- Sector mapping is curated and incomplete for some symbols
+- Score weights are initial heuristics, not proven optima
+- Backtests use a stock subset for speed and simplify capital allocation
+- No paper-trading ledger yet
+- No live order execution (by design)
+- Daily strategy only
+- Market regimes change; historical edges can fade
 
-> **Turn raw market data into clear, ranked research signals.**
+---
 
-You now have:
+## 15. Recommended next steps
 
-- Secure broker API login
-- A reusable local dashboard
-- A working Nifty 100 SMA crossover engine
-- Real signal output you can review every day
+1. Measure forward returns by score bucket (1D/3D/5D/10D/20D)
+2. Validate which score factors actually improve outcomes
+3. Expand/maintain sector mappings carefully
+4. Add paper trading journal
+5. Add risk-engine rules (max risk per trade, max correlated exposure)
+6. Only then consider tightly controlled live execution
 
-That is a solid foundation. The next leap is not “place orders immediately,” but “prove which signals are worth acting on.”
+---
+
+## 16. Glossary
+
+| Term | Meaning |
+|------|---------|
+| SMA | Simple Moving Average of closes |
+| Crossover | Short SMA crossing long SMA |
+| Spread % | Distance between short and long SMA |
+| Slope | Whether long SMA is rising/flat/falling |
+| RSI | Relative Strength Index (momentum) |
+| ATR | Average True Range (volatility) |
+| R:R | Reward-to-risk research ratio |
+| Signal score | Rule alignment score, not win probability |
+| Backtest | Historical simulation under explicit assumptions |
+| Slippage | Adverse fill difference vs ideal price |
+| Look-ahead bias | Accidentally using future data in a test |
+
+---
+
+## 17. Bottom line
+
+MarketResearch has grown from a simple SMA crossover scanner into a **professional research workstation**:
+
+- richer evidence per signal
+- explainable quality scores
+- filters for careful shortlisting
+- backtests to challenge assumptions
+- explicit warnings against overconfidence
+
+Use it to improve your **decision process**.
+
+Do not use it as a substitute for risk management, judgment, or humility about uncertainty.
+
+> Better research questions beat louder predictions.
+
+---
+
+## 18. Research layer and how to analyse results
+
+Added on top of the scanner. It does not replace technical rules and it does not forecast price.
+
+When you open a stock, the app loads:
+
+- next earnings date and whether it is within 7 days
+- a valuation flag from trailing PE (`LOW_PE`, `MID_PE`, `HIGH_PE`, `UNKNOWN`)
+- a headline sentiment tag (`POSITIVE`, `NEUTRAL`, `NEGATIVE`, `UNCLEAR`)
+- a decision: `RESEARCH_CANDIDATE`, `WATCH`, or `SKIP`
+
+**Careful filter** (on by default) keeps only setups with score at least 70, aligned long-SMA slope, volume that is not weak, and extension status `NORMAL`.
+
+### How to read a result
+
+1. Scanner first. If it fails the careful filter, stop.
+2. Open details. If sentiment is `UNCLEAR` or `NEGATIVE`, or earnings are near, the decision will say `SKIP`.
+3. `RESEARCH_CANDIDATE` means the checks agree. Confirm the chart yourself and size small if you act.
+4. Save a journal note. Later, record the percent result.
+5. The analysis panel compares your logged outcomes: high score plus positive headlines versus high score without them.
+
+That comparison is from your journal, not a historical news backtest. Technical backtests still live on the Backtesting tab and include costs. Do not treat one good headline, or a small sample, as proof.
+
+---
+
+## Disclaimer
+
+This dashboard provides quantitative market-research signals based on historical market data and configurable trading rules. Signals, scores, stop references and targets are informational and are not guarantees of future performance or investment advice.

@@ -143,6 +143,82 @@ class KiteSessionService:
             "broker": profile.get("broker"),
         }
 
+    def get_portfolio(self) -> dict[str, Any]:
+        """Holdings and open positions. Never returns tokens or account secrets."""
+        kite = self.get_kite()
+        holdings_raw = kite.holdings() or []
+        positions_raw = kite.positions() or {}
+        net_raw = positions_raw.get("net") or []
+
+        holdings = [self._holding_row(item) for item in holdings_raw]
+        holdings.sort(key=lambda row: abs(row["pnl"]), reverse=True)
+
+        positions = [
+            self._position_row(item)
+            for item in net_raw
+            if int(item.get("quantity") or 0) != 0
+        ]
+        positions.sort(key=lambda row: abs(row["pnl"]), reverse=True)
+
+        invested = sum(row["invested_value"] for row in holdings)
+        current = sum(row["current_value"] for row in holdings)
+        pnl = sum(row["pnl"] for row in holdings)
+        day_pnl = sum(row["day_pnl"] for row in holdings)
+
+        return {
+            "summary": {
+                "holdings_count": len(holdings),
+                "open_positions": len(positions),
+                "invested_value": round(invested, 2),
+                "current_value": round(current, 2),
+                "pnl": round(pnl, 2),
+                "pnl_pct": round((pnl / invested) * 100, 2) if invested else 0.0,
+                "day_pnl": round(day_pnl, 2),
+            },
+            "holdings": holdings,
+            "positions": positions,
+        }
+
+    @staticmethod
+    def _money(value: Any) -> float:
+        try:
+            return round(float(value or 0), 2)
+        except (TypeError, ValueError):
+            return 0.0
+
+    def _holding_row(self, item: dict[str, Any]) -> dict[str, Any]:
+        quantity = int(item.get("quantity") or 0) + int(item.get("t1_quantity") or 0)
+        average = self._money(item.get("average_price"))
+        last = self._money(item.get("last_price"))
+        invested = round(average * quantity, 2)
+        current = round(last * quantity, 2)
+        return {
+            "symbol": str(item.get("tradingsymbol") or ""),
+            "exchange": str(item.get("exchange") or ""),
+            "quantity": quantity,
+            "average_price": average,
+            "last_price": last,
+            "invested_value": invested,
+            "current_value": current,
+            "pnl": self._money(item.get("pnl")),
+            "day_change_pct": self._money(item.get("day_change_percentage")),
+            "day_pnl": round(self._money(item.get("day_change")) * quantity, 2),
+        }
+
+    def _position_row(self, item: dict[str, Any]) -> dict[str, Any]:
+        quantity = int(item.get("quantity") or 0)
+        return {
+            "symbol": str(item.get("tradingsymbol") or ""),
+            "exchange": str(item.get("exchange") or ""),
+            "product": str(item.get("product") or ""),
+            "quantity": quantity,
+            "average_price": self._money(item.get("average_price")),
+            "last_price": self._money(item.get("last_price")),
+            "pnl": self._money(item.get("pnl")),
+            "realised": self._money(item.get("realised")),
+            "unrealised": self._money(item.get("unrealised")),
+        }
+
     def _save_to_disk(self, payload: dict[str, Any]) -> None:
         SESSION_FILE.parent.mkdir(parents=True, exist_ok=True)
         SESSION_FILE.write_text(json.dumps(payload, indent=2), encoding="utf-8")

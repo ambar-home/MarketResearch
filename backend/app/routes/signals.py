@@ -20,6 +20,12 @@ def sma_crossover(body: SmaCrossoverRequest) -> SmaCrossoverResponse:
             long_sma=body.long_sma,
             lookback_days=body.lookback_days,
             max_stocks=body.max_stocks,
+            rsi_period=body.rsi_period,
+            volume_period=body.volume_period,
+            atr_period=body.atr_period,
+            slope_lookback=body.slope_lookback,
+            include_market_context=body.include_market_context,
+            include_sector_context=body.include_sector_context,
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
