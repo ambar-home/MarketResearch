@@ -56,6 +56,35 @@ def test_skip_unclear_or_extended():
     assert unclear["action"] == "SKIP"
 
 
+def test_fetch_research_uses_nse_when_yahoo_is_blocked(monkeypatch):
+    from app.services import research_layer
+
+    research_layer.CACHE.clear()
+    research_layer._YAHOO_CRUMB = None
+    research_layer._YAHOO_BLOCKED_UNTIL = None
+    monkeypatch.setattr(research_layer, "_yahoo_crumb", lambda: None)
+    monkeypatch.setattr(
+        research_layer,
+        "_nse_announcements",
+        lambda symbol: [
+            {"subject": "Analyst meet update", "broadcastdate": "01-Sep-2026 10:00:00"},
+            {"subject": "Commencement of commercial production", "broadcastdate": "02-Sep-2026 10:00:00"},
+        ],
+    )
+    called = {"yahoo": False}
+
+    def _no_yahoo(*_args, **_kwargs):
+        called["yahoo"] = True
+        return None
+
+    monkeypatch.setattr(research_layer, "_get_json", _no_yahoo)
+    out = research_layer.fetch_research("BERGEPAINT")
+    assert called["yahoo"] is False
+    assert out["source"] == "NSE announcements"
+    assert out["sentiment"]["tag"] == "NEUTRAL"
+    assert len(out["sentiment"]["headlines"]) == 2
+
+
 def test_research_candidate_when_aligned():
     out = careful_decision(
         score=82,

@@ -46,7 +46,7 @@ async function postJson<T>(path: string, body?: unknown): Promise<T> {
 
 export function HourlyTab() {
   const [interval, setInterval] = useState('5minute')
-  const [source, setSource] = useState('portfolio')
+  const [source, setSource] = useState('nifty')
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [scan, setScan] = useState<Scan | null>(null)
@@ -58,7 +58,7 @@ export function HourlyTab() {
     setError(null)
     setSaved(null)
     try {
-      setScan(await postJson<Scan>('/api/hourly/scan', { interval, source, max_stocks: 10 }))
+      setScan(await postJson<Scan>('/api/hourly/scan', { interval, source, max_stocks: 200 }))
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Hourly scan failed')
     } finally {
@@ -87,8 +87,9 @@ export function HourlyTab() {
   return (
     <div className="hourly-tab">
       <p className="hourly-note">
-        This is separate from daily SMA 6/30. The label is the most aligned hourly view, not a
-        probability that the price will move.
+        This is separate from daily SMA 6/30. The default scan is the full Nifty 200, not your
+        holdings. The label is the most aligned hourly view, not a probability that the price will move.
+        A full scan can take a few minutes.
       </p>
       <div className="hourly-controls">
         <label>
@@ -101,12 +102,12 @@ export function HourlyTab() {
         <label>
           Universe
           <select value={source} onChange={(e) => setSource(e.target.value)}>
-            <option value="portfolio">My holdings</option>
-            <option value="nifty">Nifty shortlist</option>
+            <option value="nifty">Nifty 200</option>
+            <option value="portfolio">My holdings only</option>
           </select>
         </label>
         <button className="btn btn-primary" type="button" onClick={() => void runScan()} disabled={loading}>
-          {loading ? 'Checking…' : 'Run hourly check'}
+          {loading ? (source === 'nifty' ? 'Scanning 200 names…' : 'Checking holdings…') : 'Run hourly check'}
         </button>
         <button className="btn btn-ghost" type="button" onClick={() => void checkResults()}>
           Check 15/30/60m results

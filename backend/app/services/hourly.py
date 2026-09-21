@@ -9,13 +9,14 @@ from __future__ import annotations
 
 import logging
 import os
+import time
 from datetime import datetime, timedelta
 from typing import Any
 
 import pandas as pd
 import requests
 
-from app.config import settings
+from app.config import KITE_SLEEP_SECONDS, settings
 from app.services.kite_session import kite_session
 from app.services.research_layer import fetch_research
 from app.services.sma_scanner import map_symbols_to_tokens
@@ -23,6 +24,7 @@ from app.services.transaction_costs import estimate_round_trip_costs
 
 logger = logging.getLogger(__name__)
 
+HOURLY_MAX_STOCKS = 200
 MIN_AVG_VOLUME = 20_000
 MAX_SPREAD_BPS = 15.0
 MAX_ATR_PCT = 2.5
@@ -299,7 +301,15 @@ def analyze_symbol(
     if bias.get("direction") == "SKIP":
         skips.append(str(bias.get("reason")))
 
-    research = fetch_research(symbol)
+    # News is only needed for names that already pass the price rules.
+    # Fetching it for all 200 would mostly add delay, not a better view.
+    if skips:
+        research = {
+            "sentiment": {"tag": "NOT_CHECKED", "headlines": []},
+            "earnings": {"event_risk": "UNKNOWN", "days_until": None},
+        }
+    else:
+        research = fetch_research(symbol)
     sentiment = research["sentiment"]["tag"]
     earnings = research["earnings"]
     if sentiment in {"UNCLEAR", "NEGATIVE"}:
@@ -350,22 +360,38 @@ def analyze_symbol(
     }
 
 
-def run_hourly_scan(interval: str = "5minute", source: str = "portfolio", max_stocks: int = 15) -> dict[str, Any]:
-    if interval not in {"5minute", "15minute"}:
-        raise ValueError("Interval must be 5minute or 15minute. This is not the daily strategy.")
-    if max_stocks < 1 or max_stocks > 30:
-        raise ValueError("Hourly scan is limited to 30 liquid names so the API is not hammered.")
-
-    kite = kite_session.get_kite()
+def hourly_universe(source: str, max_stocks: int) -> tuple[list[str], str]:
+    """Nifty 200 is the hourly universe. Portfolio is an optional smaller list."""
+    limit = min(max(max_stocks, 1), HOURLY_MAX_STOCKS)
     if source == "portfolio":
         holdings = kite_session.get_portfolio()["holdings"]
-        symbols = [row["symbol"] for row in holdings if row.get("symbol")][:max_stocks]
-        source_label = "Portfolio holdings"
-    else:
-        from app.services.sma_scanner import download_nifty100
+        symbols = [row["symbol"] for row in holdings if row.get("symbol")][:limit]
+        return symbols, "Portfolio holdings"
 
-        symbols = download_nifty100()["Symbol"].head(max_stocks).tolist()
-        source_label = "Nifty liquid shortlist"
+    from app.services.sma_scanner import download_nifty200
+
+    universe = download_nifty200()
+    symbols = universe["Symbol"].head(limit).tolist()
+    return symbols, "Nifty 200"
+
+
+def _quotes(kite: Any, symbols: list[str]) -> dict[str, Any]:
+    quotes: dict[str, Any] = {}
+    for start in range(0, len(symbols), 100):
+        chunk = [_quote_symbol(symbol) for symbol in symbols[start : start + 100]]
+        if chunk:
+            quotes.update(kite.quote(chunk) or {})
+    return quotes
+
+
+def run_hourly_scan(interval: str = "5minute", source: str = "nifty", max_stocks: int = HOURLY_MAX_STOCKS) -> dict[str, Any]:
+    if interval not in {"5minute", "15minute"}:
+        raise ValueError("Interval must be 5minute or 15minute. This is not the daily strategy.")
+    if max_stocks < 1 or max_stocks > HOURLY_MAX_STOCKS:
+        raise ValueError("Hourly scan accepts 1 to 200 names from Nifty 200.")
+
+    kite = kite_session.get_kite()
+    symbols, source_label = hourly_universe(source, max_stocks)
 
     if not symbols:
         return {
@@ -373,11 +399,13 @@ def run_hourly_scan(interval: str = "5minute", source: str = "portfolio", max_st
             "source": source_label,
             "calls": [],
             "best": None,
-            "note": "No symbols to scan. Add holdings or choose the Nifty shortlist.",
+            "note": "No symbols to scan.",
+            "stocks_requested": max_stocks,
+            "stocks_scanned": 0,
         }
 
     tokens = map_symbols_to_tokens(kite, symbols)
-    quotes = kite.quote([_quote_symbol(symbol) for symbol in symbols if symbol in tokens])
+    quotes = _quotes(kite, [symbol for symbol in symbols if symbol in tokens])
     ranked = []
     for symbol in symbols:
         quote = quotes.get(_quote_symbol(symbol)) or {}
@@ -388,7 +416,9 @@ def run_hourly_scan(interval: str = "5minute", source: str = "portfolio", max_st
 
     index_view = index_bias(kite, interval)
     calls = []
-    for symbol in selected:
+    for index, symbol in enumerate(selected):
+        if index:
+            time.sleep(KITE_SLEEP_SECONDS)
         try:
             calls.append(
                 analyze_symbol(
@@ -418,6 +448,8 @@ def run_hourly_scan(interval: str = "5minute", source: str = "portfolio", max_st
     return {
         "interval": interval,
         "source": source_label,
+        "stocks_requested": max_stocks,
+        "stocks_scanned": len(calls),
         "separated_from_daily": "Daily SMA 6/30 is not used here.",
         "index_hour": index_view,
         "calls": calls,

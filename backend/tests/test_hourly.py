@@ -51,3 +51,18 @@ def test_paper_size_is_small():
 def test_stats_do_not_invent_hit_rate():
     stats = _stats([])
     assert stats["hit_rate_60m"] is None
+
+
+def test_hourly_universe_uses_nifty_200_not_holdings(monkeypatch):
+    import pandas as pd
+
+    from app.services import hourly
+
+    monkeypatch.setattr(
+        "app.services.sma_scanner.download_nifty200",
+        lambda: pd.DataFrame({"Symbol": [f"STK{i}" for i in range(200)]}),
+    )
+    symbols, label = hourly.hourly_universe("nifty", 200)
+    assert label == "Nifty 200"
+    assert len(symbols) == 200
+    assert symbols[0] == "STK0"

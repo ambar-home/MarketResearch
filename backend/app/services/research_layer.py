@@ -10,7 +10,7 @@ from __future__ import annotations
 import json
 import logging
 import uuid
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -187,19 +187,128 @@ def careful_decision(
     }
 
 
-def _get_json(url: str) -> dict[str, Any] | None:
+_YAHOO = requests.Session()
+_YAHOO.headers.update(
+    {
+        "User-Agent": (
+            "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
+            "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"
+        ),
+        "Accept": "application/json,text/plain,*/*",
+    }
+)
+_YAHOO_CRUMB: str | None = None
+_YAHOO_BLOCKED_UNTIL: datetime | None = None
+
+
+def _yahoo_blocked() -> bool:
+    return _YAHOO_BLOCKED_UNTIL is not None and datetime.now() < _YAHOO_BLOCKED_UNTIL
+
+
+def _block_yahoo(minutes: int = 15) -> None:
+    """Stop retrying Yahoo after the first 401/429 so a scan does not spam logs."""
+    global _YAHOO_CRUMB, _YAHOO_BLOCKED_UNTIL
+    if _yahoo_blocked():
+        return
+    _YAHOO_CRUMB = None
+    _YAHOO_BLOCKED_UNTIL = datetime.now() + timedelta(minutes=minutes)
+    logger.info(
+        "Yahoo research is unauthorized or rate-limited; using NSE announcements for %s minutes",
+        minutes,
+    )
+
+
+def _yahoo_crumb() -> str | None:
+    """Yahoo quote APIs now require a cookie plus crumb or they return 401."""
+    global _YAHOO_CRUMB
+    if _yahoo_blocked():
+        return None
+    if _YAHOO_CRUMB:
+        return _YAHOO_CRUMB
     try:
-        response = requests.get(
-            url,
-            headers={"User-Agent": "Mozilla/5.0 MarketResearch research layer"},
+        _YAHOO.get("https://fc.yahoo.com", timeout=12)
+    except requests.RequestException:
+        pass
+    try:
+        crumb_response = _YAHOO.get(
+            "https://query1.finance.yahoo.com/v1/test/getcrumb",
             timeout=12,
         )
+        if crumb_response.status_code in {401, 429}:
+            _block_yahoo()
+            return None
+        crumb_response.raise_for_status()
+        crumb = crumb_response.text.strip()
+        if crumb and "Denied" not in crumb and not crumb.startswith("{"):
+            _YAHOO_CRUMB = crumb
+            return crumb
+    except requests.RequestException as exc:
+        logger.info("Yahoo crumb fetch failed: %s", exc)
+    _block_yahoo()
+    return None
+
+
+def _get_json(url: str, auth: bool = False) -> dict[str, Any] | None:
+    try:
+        target = url
+        if auth:
+            crumb = _yahoo_crumb()
+            if not crumb:
+                return None
+            joiner = "&" if "?" in url else "?"
+            target = f"{url}{joiner}crumb={requests.utils.quote(crumb)}"
+        response = _YAHOO.get(target, timeout=12)
+        if response.status_code in {401, 429}:
+            if auth:
+                _block_yahoo()
+            return None
         response.raise_for_status()
         payload = response.json()
         return payload if isinstance(payload, dict) else None
     except Exception as exc:
         logger.info("research fetch failed: %s", exc)
         return None
+
+
+def _nse_announcements(symbol: str) -> list[dict[str, str]]:
+    """Official NSE corporate announcements. Used when Yahoo blocks research calls."""
+    try:
+        response = requests.get(
+            "https://www.nseindia.com/api/top-corp-info",
+            params={"symbol": symbol, "market": "equities"},
+            headers={
+                "User-Agent": (
+                    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
+                    "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"
+                ),
+                "Accept": "application/json",
+                "Referer": "https://www.nseindia.com/",
+            },
+            timeout=12,
+        )
+        if response.status_code != 200:
+            return []
+        rows = ((response.json().get("latest_announcements") or {}).get("data")) or []
+        return [row for row in rows if isinstance(row, dict)]
+    except (requests.RequestException, ValueError) as exc:
+        logger.info("NSE announcement fetch failed for %s: %s", symbol, exc)
+        return []
+
+
+def _earnings_from_announcements(rows: list[dict[str, str]], today: date | None = None) -> str | None:
+    today = today or date.today()
+    for row in rows:
+        subject = str(row.get("subject") or "").lower()
+        if "financial result" not in subject and "outcome of board" not in subject:
+            continue
+        raw = str(row.get("broadcastdate") or "")[:11].strip()
+        try:
+            announced = datetime.strptime(raw, "%d-%b-%Y").date()
+        except ValueError:
+            continue
+        if announced == today:
+            return announced.isoformat()
+    return None
 
 
 def fetch_research(ticker: str) -> dict[str, Any]:
@@ -209,19 +318,39 @@ def fetch_research(ticker: str) -> dict[str, Any]:
         return cached[1]
 
     symbol = yahoo_symbol(key)
-    summary = _get_json(
-        "https://query1.finance.yahoo.com/v10/finance/quoteSummary/"
-        f"{symbol}?modules=calendarEvents,summaryDetail,defaultKeyStatistics"
-    )
-    search = _get_json(
-        "https://query1.finance.yahoo.com/v1/finance/search"
-        f"?q={symbol}&quotesCount=0&newsCount=6"
-    )
+    announcements = _nse_announcements(key)
+    summary = None
+    quote = None
+    if _yahoo_crumb():
+        summary = _get_json(
+            "https://query1.finance.yahoo.com/v10/finance/quoteSummary/"
+            f"{symbol}?modules=calendarEvents,summaryDetail,defaultKeyStatistics",
+            auth=True,
+        )
+        if not summary:
+            quote = _get_json(
+                f"https://query1.finance.yahoo.com/v7/finance/quote?symbols={symbol}",
+                auth=True,
+            )
+
+    headlines = [str(row.get("subject")) for row in announcements if row.get("subject")]
+    source = "NSE announcements"
+    if not headlines and not _yahoo_blocked():
+        search = _get_json(
+            "https://query1.finance.yahoo.com/v1/finance/search"
+            f"?q={symbol}&quotesCount=0&newsCount=6"
+        )
+        if search:
+            source = "Yahoo Finance headlines"
+            for item in search.get("news") or []:
+                title = item.get("title")
+                if title:
+                    headlines.append(str(title))
 
     pe = None
-    earnings_iso = None
-    headlines: list[str] = []
+    earnings_iso = _earnings_from_announcements(announcements)
     if summary:
+        source = "NSE announcements + Yahoo valuation"
         result = ((summary.get("quoteSummary") or {}).get("result") or [None])[0] or {}
         detail = result.get("summaryDetail") or {}
         pe_raw = (detail.get("trailingPE") or {}).get("raw")
@@ -231,27 +360,30 @@ def fetch_research(ticker: str) -> dict[str, Any]:
         dates = earnings.get("earningsDate") or []
         if dates and isinstance(dates[0], dict) and dates[0].get("fmt"):
             earnings_iso = str(dates[0]["fmt"])
-    if search:
-        for item in search.get("news") or []:
-            title = item.get("title")
-            if title:
-                headlines.append(str(title))
+    if pe is None and quote:
+        quoted = ((quote.get("quoteResponse") or {}).get("result") or [None])[0] or {}
+        pe_raw = quoted.get("trailingPE")
+        if isinstance(pe_raw, (int, float)):
+            pe = round(float(pe_raw), 2)
+        stamp = quoted.get("earningsTimestamp")
+        if earnings_iso is None and isinstance(stamp, (int, float)):
+            earnings_iso = datetime.fromtimestamp(int(stamp)).date().isoformat()
 
     sentiment = classify_headlines(headlines)
     valuation = valuation_flag(pe)
-    earnings = earnings_context(earnings_iso)
+    earnings_info = earnings_context(earnings_iso)
     payload = {
         "ticker": key,
-        "source": "Yahoo Finance public quote/news",
+        "source": source,
         "valuation": valuation,
-        "earnings": earnings,
+        "earnings": earnings_info,
         "sentiment": {
             **sentiment,
             "headlines": headlines[:5],
         },
         "note": (
             "Valuation and sentiment are context flags. They do not predict the next move. "
-            "Headline tags are keyword-based and can miss sarcasm or important nuance."
+            "News tags use NSE announcements first because Yahoo often rejects unsigned requests."
         ),
     }
     CACHE[key] = (datetime.now(), payload)

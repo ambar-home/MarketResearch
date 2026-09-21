@@ -12,8 +12,8 @@ router = APIRouter(prefix="/api/hourly", tags=["hourly"])
 
 class HourlyScanRequest(BaseModel):
     interval: str = Field("5minute", pattern="^(5minute|15minute)$")
-    source: str = Field("portfolio", pattern="^(portfolio|nifty)$")
-    max_stocks: int = Field(10, ge=1, le=30)
+    source: str = Field("nifty", pattern="^(portfolio|nifty)$")
+    max_stocks: int = Field(200, ge=1, le=200)
 
 
 @router.post("/scan")
